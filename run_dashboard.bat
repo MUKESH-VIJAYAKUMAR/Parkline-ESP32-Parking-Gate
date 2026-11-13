@@ -32,7 +32,7 @@ if errorlevel 1 (
 )
 
 :CheckDependencies
-"%VENV_PYTHON%" -c "import flask, supabase, dotenv" >nul 2>nul
+"%VENV_PYTHON%" -c "import flask, supabase, dotenv, tzdata" >nul 2>nul
 if errorlevel 1 (
     echo Installing the pinned dashboard dependencies...
     "%VENV_PYTHON%" -m pip install -r requirements.txt

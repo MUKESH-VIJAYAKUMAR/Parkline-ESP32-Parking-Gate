@@ -211,7 +211,8 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
+    if os.getenv("PARKLINE_OPEN_BROWSER", "1") != "0":
+        threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
     print("Smart Parking Dashboard: http://127.0.0.1:5000")
     print("This local dashboard listens only on this computer (127.0.0.1).")
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

@@ -8,7 +8,7 @@ A local Flask dashboard for managing registered parking users and reviewing RFID
 - **Parking users** — searchable, paginated driver records with vehicle plates and RFID card UIDs.
 - **Access logs** — paginated entry/exit events showing card tap time separately from confirmed vehicle passage time.
 - **Add user** — register a driver, plate, and RFID UID. Duplicate card UIDs are rejected.
-- **Windows launcher** — `run_dashboard.bat` creates a local Python environment, installs the pinned direct dependencies when needed, and starts the dashboard in your browser.
+- **Windows Control Center** — `Start_Smart_Parking.vbs` opens a quiet Smart Print-style launcher with status, start/stop, and open-dashboard controls. It prepares Python packages in the background, checks that Flask is responding, then opens the UI. `run_dashboard.bat` remains available as a console fallback.
 - **ESP32 status placeholder** — clearly shows that the hardware is not connected; it does not display simulated sensor or gate readings.
 
 The dashboard refreshes its Supabase data every 30 seconds while the browser tab is visible. It listens only on `127.0.0.1`, so it is intended for the admin computer in this phase.
@@ -29,7 +29,7 @@ The schema enables Row Level Security and creates no anonymous or signed-in clie
 
 ## Start the dashboard
 
-Double-click [`run_dashboard.bat`](run_dashboard.bat). It reuses `.venv` when present, otherwise finds an installed Python 3.11+ runtime, creates the environment, installs the pinned requirements, and starts Flask.
+Double-click [`Start_Smart_Parking.vbs`](Start_Smart_Parking.vbs) to open the Control Center without a command prompt. Choose **Start dashboard**; the launcher prepares `.venv` and dependencies as needed, starts Flask, waits for it to respond, and opens the UI. Use [`run_dashboard.bat`](run_dashboard.bat) if you want a console window.
 
 To start from PowerShell after the environment is set up:
 

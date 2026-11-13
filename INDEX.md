@@ -7,7 +7,9 @@ Parkline is a Flask dashboard for registering RFID users and viewing parking ent
 | Path | Purpose |
 | --- | --- |
 | [`README.md`](README.md) | Setup, Supabase status, and dashboard operation |
-| [`run_dashboard.bat`](run_dashboard.bat) | Windows launcher for the Flask dashboard |
+| [`Start_Smart_Parking.vbs`](Start_Smart_Parking.vbs) | Opens the quiet desktop Control Center |
+| [`SmartParking_Launcher/launcher.pyw`](SmartParking_Launcher/launcher.pyw) | Start/stop UI, dependency setup, health check, and browser opening |
+| [`run_dashboard.bat`](run_dashboard.bat) | Console fallback for starting Flask |
 | [`app.py`](app.py) | Flask routes, validation, and server-side Supabase access |
 | [`requirements.txt`](requirements.txt) | Pinned Python dependencies |
 | [`.env.example`](.env.example) | Safe local configuration template |
@@ -24,6 +26,7 @@ database/       SQL schema
 templates/      Flask HTML templates
 static/css/     Dashboard styles
 static/js/      Dashboard behavior
+SmartParking_Launcher/  Desktop launcher and local logs
 ```
 
 ## Local-only files
