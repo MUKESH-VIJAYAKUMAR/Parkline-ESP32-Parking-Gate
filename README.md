@@ -1,31 +1,55 @@
 # Parkline · Smart Parking Dashboard
 
-A responsive Flutter dashboard for the RFID smart parking project. It shows parking users, their linked vehicle and RFID card, gate state, and card tap / confirmed passage times.
+A local Flask dashboard for managing registered parking users and reviewing RFID entry/exit records. The UI follows the compact sidebar and card layout used in Smart Print, with a quieter navy, teal, and mint palette.
 
-## Run locally
+## What is included
 
-Requires a current stable Flutter SDK with Dart 3.13.4 or newer.
+- **Overview** — registered drivers, cars currently inside, today's confirmed entries and exits, and recent access.
+- **Parking users** — searchable, paginated driver records with vehicle plates and RFID card UIDs.
+- **Access logs** — paginated entry/exit events showing card tap time separately from confirmed vehicle passage time.
+- **Add user** — register a driver, plate, and RFID UID. Duplicate card UIDs are rejected.
+- **Windows launcher** — `run_dashboard.bat` creates a local Python environment, installs the pinned direct dependencies when needed, and starts the dashboard in your browser.
+- **ESP32 status placeholder** — clearly shows that the hardware is not connected; it does not display simulated sensor or gate readings.
+
+The dashboard refreshes its Supabase data every 30 seconds while the browser tab is visible. It listens only on `127.0.0.1`, so it is intended for the admin computer in this phase.
+
+## Configure your Smart Parking Supabase project
+
+The connected Supabase integration did not grant this workspace permission to inspect project `wiyjgmwktmopddvoudsm`, so no database changes have been applied. The Flask dashboard expects the schema in [`database/schema.sql`](database/schema.sql).
+
+1. Open the SQL Editor for your **Smart Parking** project, confirm its project reference, and run `database/schema.sql`.
+2. Copy `.env.example` to `.env` in this folder.
+3. In the Smart Parking project's API keys settings, create/copy a **server-side secret key** and put it in `SUPABASE_SECRET_KEY` in `.env`. Do not use a publishable key for this admin backend, share the secret key, or commit `.env`.
+4. Leave the URL as `https://wiyjgmwktmopddvoudsm.supabase.co` if that is the project you intend to use.
+5. Double-click `run_dashboard.bat`.
+
+The schema enables Row Level Security and creates no anonymous or signed-in client policies. The secret key stays in the local Flask backend; it is never sent to browser JavaScript. The application is local-only and does not provide admin authentication for a publicly exposed server.
+
+## Start from PowerShell
+
+Requires Python 3.11 or newer (Python 3.12 recommended for the pinned Supabase client).
 
 ```powershell
-flutter pub get
-flutter run -d chrome
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+# Add the Supabase secret key to .env, then run:
+.\.venv\Scripts\python.exe app.py
 ```
 
-You can also open it as a Windows desktop app with `flutter run -d windows`.
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000). The launcher opens it automatically.
 
-## Dashboard pages
+## Data model for the ESP32 phase
 
-- **Overview** — registered users, vehicles inside, entry / exit totals, activity chart, gate and sensor status, recent access, and new users.
-- **Parking users** — searchable user, vehicle plate, card UID, and inside / outside records.
-- **Access logs** — searchable-by-direction event history with separate card tap and vehicle passage times.
+`parking_users` stores the driver's name, vehicle plate, normalized RFID UID, and current inside/outside state. `parking_events` stores the access direction, granted/denied result, card tap timestamp, and (when the IR sensor confirms passage) vehicle passage timestamp.
 
-Use **Add user** to register a name, vehicle plate, and RFID UID. This UI pass uses sample data in memory, so new records reset when the app is closed. Supabase persistence and live ESP32 status will be connected in the next integration phase; the `DEMO DATA` labels identify the current sample content.
+The SQL trigger updates `parking_users.current_status` only after a granted event has a `vehicle_passed_at` timestamp. The hardware integration should therefore record the tap first, then set the passage timestamp after the IR sensor confirms that the car cleared the gate. For denied taps, keep `parking_user_id` null when the card is not registered, record the UID and set `access_status` to `DENIED`.
 
-## Project structure
+## Project files
 
-- `lib/models/` — parking user and access event models
-- `lib/data/` — demo records used by the UI prototype
-- `lib/screens/` — responsive overview, user list, and access history
-- `lib/widgets/` — reusable cards, status badges, event tables, and registration form
-
-The gate state shown here is sample data. A physical controller should only report an entry or exit after the vehicle passage sensor confirms the vehicle has cleared the gate path.
+- `app.py` — Flask routes, validation, and server-side Supabase client.
+- `templates/index.html` — dashboard layout and user form.
+- `static/css/dashboard.css` — responsive Parkline theme.
+- `static/js/dashboard.js` — table rendering, search, pagination, and refresh behavior.
+- `database/schema.sql` — proposed Smart Parking schema and passage-status trigger; not applied to Supabase from this workspace.
+- `.env.example` — configuration template. Keep the real `.env` local.
