@@ -7,6 +7,7 @@ Parkline is the ESP32 and Flask smart-parking project. See [`README.md`](README.
 | Path | Purpose |
 | --- | --- |
 | [`README.md`](README.md) | Project description, architecture, setup, wiring, and troubleshooting |
+| [`docs/hardware-and-wiring.md`](docs/hardware-and-wiring.md) | Required components, ESP32 GPIO map, power, and breadboard wiring guide |
 | [`app.py`](app.py) | Flask dashboard, API routes, validation, and server-side Supabase integration |
 | [`requirements.txt`](requirements.txt) | Pinned Python package dependencies |
 | [`.env.example`](.env.example) | Safe template for local Supabase and device configuration |
@@ -26,6 +27,7 @@ Parkline is the ESP32 and Flask smart-parking project. See [`README.md`](README.
 
 ```text
 database/                   Supabase schema
+docs/                       Hardware and wiring documentation
 firmware/ParkingGate/       Integrated gate firmware and local config template
 firmware/BuzzerTest/        Standalone buzzer test
 SmartParking_Launcher/      Windows Control Center

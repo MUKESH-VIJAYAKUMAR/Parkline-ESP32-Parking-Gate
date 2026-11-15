@@ -37,6 +37,8 @@ The firmware has a 15-second open-gate safety timeout and a 30-second wait limit
 
 ## Hardware and pin map
 
+For the full bill of materials, power notes, breadboard guidance, and pin-by-pin wiring reference, see [`docs/hardware-and-wiring.md`](docs/hardware-and-wiring.md).
+
 | Component | Signal | ESP32 connection |
 | --- | --- | --- |
 | RC522 RFID reader | SDA / SS | GPIO 5 |
@@ -57,6 +59,7 @@ The current firmware expects both IR modules to report detection as `LOW`. It sc
 
 ```text
 database/                       Supabase tables, indexes, RLS, and status trigger
+docs/                           Hardware, wiring, and project reference guides
 firmware/ParkingGate/           Integrated ESP32 parking-gate sketch and safe config template
 firmware/BuzzerTest/            Standalone buzzer diagnostic sketch
 SmartParking_Launcher/          Windows Control Center source
