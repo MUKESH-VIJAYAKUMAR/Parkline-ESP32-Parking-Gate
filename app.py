@@ -6,13 +6,14 @@ import re
 import secrets
 import threading
 import webbrowser
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from functools import lru_cache
 from pathlib import Path
+from time import monotonic
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request
 from supabase import Client, create_client
 
 
@@ -25,6 +26,15 @@ PAGE_SIZE_DEFAULT = 25
 PAGE_SIZE_MAX = 100
 SEARCH_CHARS = re.compile(r"[^A-Za-z0-9 _.-]")
 RFID_SEPARATORS = re.compile(r"[\s:-]")
+DEVICE_STATUS_LOCK = threading.Lock()
+DEVICE_STATUS = {
+    "last_seen": None,
+    "gate_open": False,
+    "ir_entry_detected": False,
+    "ir_exit_detected": False,
+    "wifi_rssi": None,
+    "_last_seen_monotonic": 0.0,
+}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("parking_dashboard")
@@ -83,6 +93,24 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY") or secrets.token_urlsafe(32)
 
+    @app.before_request
+    def keep_dashboard_local():
+        # The ESP32 can reach only the authenticated POST endpoints over Wi-Fi.
+        # Browser pages, static files, and admin APIs remain on this computer.
+        if request.path.startswith("/api/device/") and request.method == "POST":
+            return None
+        if request.remote_addr not in {"127.0.0.1", "::1"}:
+            abort(403)
+
+    def require_device_key():
+        expected = (os.getenv("ESP32_API_KEY") or "").strip()
+        provided = request.headers.get("X-Device-Key", "").strip()
+        if not expected:
+            return jsonify({"error": "ESP32_API_KEY is not configured on the dashboard server."}), 503
+        if not provided or not secrets.compare_digest(provided, expected):
+            return jsonify({"error": "Unauthorized device."}), 401
+        return None
+
     @app.get("/")
     def index():
         return render_template("index.html")
@@ -97,11 +125,13 @@ def create_app() -> Flask:
             )
             entries_today = read_count(
                 events_table().select("id", count="exact").eq("direction", "ENTRY")
-                .eq("access_status", "GRANTED").gte("card_tapped_at", today_start.isoformat()).limit(1)
+                .eq("access_status", "GRANTED").gte("card_tapped_at", today_start.isoformat())
+                .not_.is_("vehicle_passed_at", "null").limit(1)
             )
             exits_today = read_count(
                 events_table().select("id", count="exact").eq("direction", "EXIT")
-                .eq("access_status", "GRANTED").gte("card_tapped_at", today_start.isoformat()).limit(1)
+                .eq("access_status", "GRANTED").gte("card_tapped_at", today_start.isoformat())
+                .not_.is_("vehicle_passed_at", "null").limit(1)
             )
             recent = events_table().select(EVENT_COLUMNS).order("card_tapped_at", desc=True).limit(8).execute()
             return jsonify({
@@ -204,6 +234,115 @@ def create_app() -> Flask:
             log_database_error("access events")
             return jsonify({"error": "connection", "items": [], "total": 0}), 503
 
+    @app.post("/api/device/card-tap")
+    def device_card_tap():
+        auth_error = require_device_key()
+        if auth_error:
+            return auth_error
+
+        payload = request.get_json(silent=True) or {}
+        card_uid = RFID_SEPARATORS.sub("", str(payload.get("card_uid", ""))).upper()
+        if not 4 <= len(card_uid) <= 40 or not re.fullmatch(r"[A-Z0-9]+", card_uid):
+            return jsonify({"error": "A valid RFID UID is required."}), 400
+
+        try:
+            result = users_table().select(
+                "id,full_name,vehicle_plate,rfid_uid,is_active,current_status"
+            ).eq("rfid_uid", card_uid).limit(1).execute()
+            user = (result.data or [None])[0]
+            direction = "EXIT" if user and user.get("current_status") == "INSIDE" else "ENTRY"
+            authorized = bool(user and user.get("is_active", True))
+            record = {
+                "parking_user_id": user.get("id") if user else None,
+                "user_name": user.get("full_name") if user else None,
+                "vehicle_plate": user.get("vehicle_plate") if user else None,
+                "card_uid": card_uid,
+                "direction": direction,
+                "access_status": "GRANTED" if authorized else "DENIED",
+            }
+            inserted = events_table().insert(record).execute()
+            event = (inserted.data or [None])[0]
+            if not event:
+                return jsonify({"error": "The card event could not be saved."}), 502
+            return jsonify({
+                "event_id": event["id"],
+                "authorized": authorized,
+                "direction": direction,
+                "user_name": record["user_name"],
+                "vehicle_plate": record["vehicle_plate"],
+                "message": "Access granted." if authorized else "Card is not registered or is inactive.",
+            })
+        except SupabaseNotConfigured:
+            return jsonify({"error": "The server-side Supabase secret is not configured."}), 503
+        except Exception:
+            log_database_error("ESP32 card tap")
+            return jsonify({"error": "The card event could not be saved to Supabase."}), 503
+
+    @app.post("/api/device/passage")
+    def device_vehicle_passage():
+        auth_error = require_device_key()
+        if auth_error:
+            return auth_error
+
+        payload = request.get_json(silent=True) or {}
+        event_id = str(payload.get("event_id", "")).strip()
+        if not re.fullmatch(r"[0-9a-fA-F-]{36}", event_id):
+            return jsonify({"error": "A valid event ID is required."}), 400
+
+        try:
+            existing = events_table().select("id,access_status,vehicle_passed_at").eq("id", event_id).limit(1).execute()
+            event = (existing.data or [None])[0]
+            if not event:
+                return jsonify({"error": "The access event was not found."}), 404
+            if event["access_status"] != "GRANTED":
+                return jsonify({"error": "A denied card tap cannot be confirmed as a passage."}), 409
+            if event.get("vehicle_passed_at"):
+                return jsonify({"confirmed": True, "already_confirmed": True})
+
+            updated = events_table().update({
+                "vehicle_passed_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", event_id).eq("access_status", "GRANTED").select("id,vehicle_passed_at").execute()
+            if not updated.data:
+                return jsonify({"error": "The vehicle passage could not be confirmed."}), 409
+            return jsonify({"confirmed": True, "already_confirmed": False})
+        except SupabaseNotConfigured:
+            return jsonify({"error": "The server-side Supabase secret is not configured."}), 503
+        except Exception:
+            log_database_error("ESP32 vehicle passage")
+            return jsonify({"error": "The vehicle passage could not be saved to Supabase."}), 503
+
+    @app.post("/api/device/heartbeat")
+    def device_heartbeat():
+        auth_error = require_device_key()
+        if auth_error:
+            return auth_error
+
+        payload = request.get_json(silent=True) or {}
+        try:
+            wifi_rssi = int(payload.get("wifi_rssi")) if payload.get("wifi_rssi") is not None else None
+        except (TypeError, ValueError):
+            wifi_rssi = None
+        now = datetime.now(timezone.utc)
+        with DEVICE_STATUS_LOCK:
+            DEVICE_STATUS.update({
+                "last_seen": now.isoformat(),
+                "gate_open": payload.get("gate_open") is True,
+                "ir_entry_detected": payload.get("ir_entry_detected") is True,
+                "ir_exit_detected": payload.get("ir_exit_detected") is True,
+                "wifi_rssi": wifi_rssi,
+                "_last_seen_monotonic": monotonic(),
+            })
+        return jsonify({"received": True})
+
+    @app.get("/api/device/status")
+    def device_status():
+        with DEVICE_STATUS_LOCK:
+            status = dict(DEVICE_STATUS)
+        last_seen_age = monotonic() - status.pop("_last_seen_monotonic")
+        status["online"] = last_seen_age <= 25
+        status["seconds_since_seen"] = round(last_seen_age) if status["last_seen"] else None
+        return jsonify(status)
+
     return app
 
 
@@ -214,5 +353,6 @@ if __name__ == "__main__":
     if os.getenv("PARKLINE_OPEN_BROWSER", "1") != "0":
         threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
     print("Smart Parking Dashboard: http://127.0.0.1:5000")
-    print("This local dashboard listens only on this computer (127.0.0.1).")
-    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+    host = os.getenv("PARKING_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    print("The browser dashboard is restricted to this computer; the ESP32 API uses its device key.")
+    app.run(host=host, port=5000, debug=False, threaded=True)

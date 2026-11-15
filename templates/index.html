@@ -39,9 +39,9 @@
 
         <section class="sidebar-controller" aria-label="Hardware controller status">
           <div class="controller-top"><span class="controller-dot"></span><span>CONTROLLER</span></div>
-          <strong>ESP32 not connected</strong>
-          <p>Hardware status will appear here after the controller is integrated.</p>
-          <span class="controller-chip">SETUP IN PROGRESS</span>
+          <strong id="controller-sidebar-title">ESP32 waiting</strong>
+          <p id="controller-sidebar-note">Waiting for the first live signal.</p>
+          <span class="controller-chip" id="controller-sidebar-chip">OFFLINE</span>
         </section>
 
         <div class="sidebar-footer">
@@ -106,14 +106,19 @@
               </section>
 
               <section class="panel controller-panel">
-                <div class="panel-heading"><div><h2>Gate controller</h2><p>Device connection status</p></div><span class="status-tag status-pending"><span></span> Not connected</span></div>
+                <div class="panel-heading"><div><h2>Gate controller</h2><p>Live ESP32, gate, and sensor readings</p></div><span class="status-tag status-pending" id="controller-status"><span class="status-dot"></span><span id="controller-status-label">Waiting for device</span></span></div>
                 <div class="gate-illustration" aria-hidden="true">
                   <div class="gate-lane"><span class="lane-dash"></span><span class="lane-dash"></span><span class="lane-dash"></span></div>
                   <div class="gate-post"><span class="gate-post-light"></span></div>
                   <div class="gate-arm"><span></span><span></span><span></span><span></span><span></span></div>
                   <div class="gate-car"><svg viewBox="0 0 64 36"><path d="m8 22 4-11a5 5 0 0 1 4.7-3.3h28.6A5 5 0 0 1 50 11l4 11v7H8v-7Z"/><path d="M14 21h36M19 26h.1m27.8 0h.1M19 8l2.4 8h21.2L45 8"/></svg></div>
                 </div>
-                <div class="controller-note"><span class="note-icon" aria-hidden="true">!</span><p>Connect the ESP32 before displaying gate and IR sensor status. This dashboard does not simulate hardware readings.</p></div>
+                <div class="hardware-readings">
+                  <div class="hardware-reading"><span>Gate</span><strong id="gate-state">Waiting</strong></div>
+                  <div class="hardware-reading"><span>Entry IR</span><strong><i class="reading-indicator" id="entry-ir-indicator"></i><span id="entry-ir-state">Waiting</span></strong></div>
+                  <div class="hardware-reading"><span>Exit IR</span><strong><i class="reading-indicator" id="exit-ir-indicator"></i><span id="exit-ir-state">Waiting</span></strong></div>
+                </div>
+                <div class="controller-note"><span class="note-icon" aria-hidden="true">i</span><p id="controller-last-seen">Live status refreshes every 5 seconds.</p></div>
               </section>
             </div>
 

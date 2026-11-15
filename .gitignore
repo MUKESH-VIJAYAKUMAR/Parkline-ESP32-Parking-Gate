@@ -20,3 +20,6 @@ Thumbs.db
 
 # Local logs
 *.log
+
+# Local ESP32 Wi-Fi and API credentials
+firmware/ParkingGate/secrets.h

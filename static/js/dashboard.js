@@ -152,6 +152,53 @@ async function loadDashboard() {
   }
 }
 
+function updateSensorReading(indicatorId, labelId, online, detected) {
+  const indicator = byId(indicatorId);
+  indicator.classList.toggle('is-detected', online && detected);
+  indicator.classList.toggle('is-clear', online && !detected);
+  byId(labelId).textContent = online ? (detected ? 'Detected' : 'Clear') : 'Offline';
+}
+
+function renderDeviceStatus(status) {
+  const online = status.online === true;
+  const gateOpen = online && status.gate_open === true;
+  const badge = byId('controller-status');
+  const sidebar = document.querySelector('.sidebar-controller');
+  const panel = document.querySelector('.controller-panel');
+
+  badge.classList.remove('status-pending', 'status-online', 'status-offline');
+  badge.classList.add(online ? 'status-online' : 'status-offline');
+  byId('controller-status-label').textContent = online ? 'ESP32 connected' : 'ESP32 offline';
+  byId('controller-sidebar-title').textContent = online ? 'ESP32 connected' : 'ESP32 offline';
+  byId('controller-sidebar-note').textContent = online ? 'Live gate and sensor data received.' : 'Waiting for a device heartbeat.';
+  byId('controller-sidebar-chip').textContent = online ? 'LIVE' : 'OFFLINE';
+  sidebar.classList.toggle('is-online', online);
+  byId('gate-state').textContent = online ? (gateOpen ? 'Open' : 'Closed') : 'Offline';
+  panel.classList.toggle('gate-is-open', gateOpen);
+  document.querySelector('.gate-arm').classList.toggle('is-open', gateOpen);
+  updateSensorReading('entry-ir-indicator', 'entry-ir-state', online, status.ir_entry_detected === true);
+  updateSensorReading('exit-ir-indicator', 'exit-ir-state', online, status.ir_exit_detected === true);
+
+  if (!online) {
+    byId('controller-last-seen').textContent = 'No ESP32 heartbeat received in the last 25 seconds.';
+    return;
+  }
+  const seenAt = status.last_seen ? formatDate(status.last_seen, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) : 'just now';
+  const signal = status.wifi_rssi !== null && status.wifi_rssi !== undefined && Number.isFinite(Number(status.wifi_rssi))
+    ? ` · Wi-Fi ${status.wifi_rssi} dBm`
+    : '';
+  byId('controller-last-seen').textContent = `Last signal ${seenAt}${signal}.`;
+}
+
+async function loadDeviceStatus() {
+  try {
+    renderDeviceStatus(await requestJson('/api/device/status'));
+  } catch (error) {
+    renderDeviceStatus({ online: false });
+    byId('controller-last-seen').textContent = 'Unable to read the ESP32 status.';
+  }
+}
+
 function renderPagination(prefix, page, total, limit, prevId, nextId) {
   const pages = Math.max(1, Math.ceil(total / limit));
   const start = total ? (page - 1) * limit + 1 : 0;
@@ -332,10 +379,15 @@ document.addEventListener('DOMContentLoaded', () => {
   setCurrentDate();
   bindEvents();
   loadDashboard();
+  loadDeviceStatus();
+  window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    loadDeviceStatus();
+  }, 5000);
   window.setInterval(() => {
     if (document.visibilityState !== 'visible') return;
     loadDashboard();
     if (state.view === 'users') loadUsers();
     if (state.view === 'events') loadEvents();
-  }, 30000);
+  }, 10000);
 });
