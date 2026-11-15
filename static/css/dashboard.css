@@ -138,13 +138,13 @@ h1, h2, p { margin-top: 0; }
 .status-pending { color: #a27d3e; background: #fbf5e9; }
 .status-online { color: #20785f; background: #e8f6f0; }
 .status-offline { color: #758382; background: #eef2f1; }
-.gate-illustration { position: relative; height: 82px; margin: 12px 6px 0; overflow: hidden; }
+.gate-illustration { position: relative; height: 175px; margin: 12px 6px 0; overflow: hidden; }
 .gate-lane { position: absolute; right: 0; bottom: 1px; left: 0; display: flex; height: 24px; align-items: center; justify-content: space-around; border-top: 1px solid #e9efed; background: repeating-linear-gradient(135deg, #f8faf9, #f8faf9 7px, #f2f6f4 7px, #f2f6f4 14px); }
 .lane-dash { width: 27px; height: 2px; border-radius: 2px; background: #c7d2ce; }
 .gate-post { position: absolute; right: 23%; bottom: 18px; width: 13px; height: 45px; border-radius: 4px 4px 1px 1px; background: #456a69; box-shadow: 0 3px 7px rgba(24, 53, 56, .1); }
 .gate-post-light { position: absolute; top: 5px; left: 3px; width: 6px; height: 4px; border-radius: 3px; background: #d9ad5c; }
-.gate-arm { position: absolute; right: calc(23% + 7px); bottom: 57px; display: flex; width: 145px; height: 7px; justify-content: space-evenly; overflow: hidden; border: 1px solid #d9e4e0; border-radius: 4px; background: repeating-linear-gradient(110deg, #fff 0 11px, #dd755e 11px 20px); transform: rotate(-10deg); transform-origin: right center; transition: transform .35s ease; }
-.gate-arm.is-open { transform: rotate(-72deg); }
+.gate-arm { position: absolute; right: calc(23% + 7px); bottom: 57px; display: flex; width: 110px; height: 7px; justify-content: space-evenly; overflow: hidden; border: 1px solid #d9e4e0; border-radius: 4px; background: repeating-linear-gradient(110deg, #fff 0 11px, #dd755e 11px 20px); transform: rotate(0deg); transform-origin: right center; transition: transform .3s ease-in-out; }
+.gate-arm.is-open { transform: rotate(90deg); }
 .controller-panel.gate-is-open .gate-post-light { background: #51bd90; }
 .gate-arm span { display: none; }
 .gate-car { position: absolute; bottom: 15px; left: 13%; color: #65a4a2; }

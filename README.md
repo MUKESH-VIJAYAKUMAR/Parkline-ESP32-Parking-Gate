@@ -11,7 +11,7 @@ A local Flask dashboard for managing registered parking users and reviewing RFID
 - **Windows Control Center** — `Start_Smart_Parking.vbs` opens a quiet Smart Print-style launcher with status, start/stop, and open-dashboard controls. It prepares Python packages in the background, checks that Flask is responding, then opens the UI. `run_dashboard.bat` remains available as a console fallback.
 - **ESP32 gate integration** — authenticated RFID checks, card-tap records, IR-confirmed passage records, gate/sensor heartbeat status, and a closed-gate timeout.
 
-The dashboard refreshes parking records every 10 seconds and hardware status every 5 seconds while the browser tab is visible. Flask accepts requests on the LAN for the ESP32 API, but blocks dashboard pages and admin APIs from other devices. Keep the computer on a trusted network.
+The dashboard refreshes summary statistics, user lists, and full access logs every 10 seconds, recent access every 2 seconds, and hardware status every second while the browser tab is visible. The recent-access query is separate from the overview summary so new taps appear without waiting for the slower statistics refresh. Flask accepts requests on the LAN for the ESP32 API, but blocks dashboard pages and admin APIs from other devices. Keep the computer on a trusted network.
 
 ## Project index
 
@@ -47,7 +47,7 @@ The SQL trigger updates `parking_users.current_status` only after a granted even
 
 ## Connect the ESP32
 
-The integrated sketch is [`firmware/ParkingGate/ParkingGate.ino`](firmware/ParkingGate/ParkingGate.ino). It matches the confirmed wiring: RC522 on GPIO 5/18/19/22/23, two digital IR sensors on GPIO 32 and 33, and the servo signal on GPIO 25. Wi-Fi, HTTP, SPI, and the ESP32 PWM driver come with the ESP32 Arduino board package; the sketch needs the MFRC522 Arduino library.
+The integrated sketch is [`firmware/ParkingGate/ParkingGate.ino`](firmware/ParkingGate/ParkingGate.ino). It matches the confirmed wiring: RC522 on GPIO 5/18/19/22/23, two digital IR sensors on GPIO 32 and 33, and the servo signal on GPIO 25. It sends a device heartbeat every second so the gate animation follows the reported gate state promptly. Wi-Fi, HTTP, SPI, and the ESP32 PWM driver come with the ESP32 Arduino board package; the sketch needs the MFRC522 Arduino library.
 
 1. Open `firmware/ParkingGate/secrets.h` and set `WIFI_SSID` and `WIFI_PASSWORD` to a 2.4 GHz Wi-Fi network that the ESP32 and this computer can both reach. The local file already contains this computer's current server address and the matching device key. `secrets.h` is ignored by Git.
 2. If this computer's IPv4 address changes, replace `SERVER_BASE_URL` with `http://<computer IPv4>:5000`. Find it with `ipconfig` in Command Prompt. Do not use `127.0.0.1` in the ESP32 sketch.

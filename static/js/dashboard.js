@@ -1,5 +1,5 @@
 const PAGE_SIZE = 25;
-const state = { view: 'overview', userPage: 1, userQuery: '', eventPage: 1, eventQuery: '', eventDirection: '' };
+const state = { view: 'overview', userPage: 1, userQuery: '', eventPage: 1, eventQuery: '', eventDirection: '', recentLoading: false };
 const $ = (selector) => document.querySelector(selector);
 const byId = (id) => document.getElementById(id);
 
@@ -128,7 +128,6 @@ function renderDashboard(data) {
   byId('movement-exits').textContent = exits.toLocaleString('en-IN');
   byId('entry-bar').style.width = total ? `${Math.max(3, entries / total * 100)}%` : '0%';
   byId('exit-bar').style.width = total ? `${Math.max(3, exits / total * 100)}%` : '0%';
-  renderRecent(data.recent_events || []);
 }
 
 async function loadDashboard() {
@@ -149,6 +148,19 @@ async function loadDashboard() {
   } catch (error) {
     showSetupBanner('error');
     renderRecent([]);
+  }
+}
+
+async function loadRecentEvents() {
+  if (state.recentLoading) return;
+  state.recentLoading = true;
+  try {
+    const data = await requestJson('/api/dashboard/recent', { cache: 'no-store' });
+    renderRecent(data.items || []);
+  } catch (error) {
+    // Keep the last successfully loaded rows visible during a brief connection issue.
+  } finally {
+    state.recentLoading = false;
   }
 }
 
@@ -192,7 +204,7 @@ function renderDeviceStatus(status) {
 
 async function loadDeviceStatus() {
   try {
-    renderDeviceStatus(await requestJson('/api/device/status'));
+    renderDeviceStatus(await requestJson('/api/device/status', { cache: 'no-store' }));
   } catch (error) {
     renderDeviceStatus({ online: false });
     byId('controller-last-seen').textContent = 'Unable to read the ESP32 status.';
@@ -379,11 +391,16 @@ document.addEventListener('DOMContentLoaded', () => {
   setCurrentDate();
   bindEvents();
   loadDashboard();
+  loadRecentEvents();
   loadDeviceStatus();
   window.setInterval(() => {
     if (document.visibilityState !== 'visible') return;
     loadDeviceStatus();
-  }, 5000);
+  }, 1000);
+  window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    loadRecentEvents();
+  }, 2000);
   window.setInterval(() => {
     if (document.visibilityState !== 'visible') return;
     loadDashboard();

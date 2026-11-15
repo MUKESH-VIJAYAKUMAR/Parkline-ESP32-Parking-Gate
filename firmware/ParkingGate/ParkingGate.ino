@@ -24,7 +24,7 @@ constexpr int SERVO_CLOSED_US = 1000;
 constexpr int SERVO_OPEN_US = 2000;
 constexpr int GATE_OPEN_ANGLE = 90;
 constexpr unsigned long GATE_TIMEOUT_MS = 15000;
-constexpr unsigned long HEARTBEAT_INTERVAL_MS = 5000;
+constexpr unsigned long HEARTBEAT_INTERVAL_MS = 1000;
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 10000;
 constexpr unsigned long CARD_COOLDOWN_MS = 1200;
 

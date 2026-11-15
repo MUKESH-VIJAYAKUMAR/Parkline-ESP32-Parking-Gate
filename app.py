@@ -133,7 +133,6 @@ def create_app() -> Flask:
                 .eq("access_status", "GRANTED").gte("card_tapped_at", today_start.isoformat())
                 .not_.is_("vehicle_passed_at", "null").limit(1)
             )
-            recent = events_table().select(EVENT_COLUMNS).order("card_tapped_at", desc=True).limit(8).execute()
             return jsonify({
                 "configured": True,
                 "stats": {
@@ -142,13 +141,23 @@ def create_app() -> Flask:
                     "entries_today": entries_today,
                     "exits_today": exits_today,
                 },
-                "recent_events": recent.data or [],
             })
         except SupabaseNotConfigured:
-            return jsonify({"configured": False, "setup_required": True, "stats": {}, "recent_events": []})
+            return jsonify({"configured": False, "setup_required": True, "stats": {}})
         except Exception:
             log_database_error("dashboard data")
-            return jsonify({"configured": True, "error": "connection", "stats": {}, "recent_events": []}), 503
+            return jsonify({"configured": True, "error": "connection", "stats": {}}), 503
+
+    @app.get("/api/dashboard/recent")
+    def dashboard_recent_events():
+        try:
+            response = events_table().select(EVENT_COLUMNS).order("card_tapped_at", desc=True).limit(8).execute()
+            return jsonify({"items": response.data or []})
+        except SupabaseNotConfigured:
+            return jsonify({"items": [], "setup_required": True})
+        except Exception:
+            log_database_error("recent parking access")
+            return jsonify({"error": "connection", "items": []}), 503
 
     @app.get("/api/users")
     def list_users():
