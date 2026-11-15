@@ -1,5 +1,10 @@
 const PAGE_SIZE = 25;
-const state = { view: 'overview', userPage: 1, userQuery: '', eventPage: 1, eventQuery: '', eventDirection: '', snapshotLoading: false, deviceLoading: false, hasSnapshot: false };
+const state = { view: 'overview', userPage: 1, userQuery: '', eventPage: 1, eventQuery: '', eventDirection: '', snapshotLoading: false, recentLoading: false, deviceLoading: false, eventLoading: false, databaseConfigured: null, hasSnapshot: false, recentSignature: '', userRowsSignature: '', eventRowsSignature: '', deviceSignature: '' };
+const OVERVIEW_REFRESH_MS = 5000;
+const DEVICE_STATUS_REFRESH_MS = 250;
+const RECENT_REFRESH_MS = 1000;
+const ACCESS_LOG_REFRESH_MS = 1000;
+const USER_LIST_REFRESH_MS = 5000;
 const $ = (selector) => document.querySelector(selector);
 const byId = (id) => document.getElementById(id);
 
@@ -62,6 +67,12 @@ function setEmpty(id, visible) {
   byId(id).classList.toggle('is-hidden', !visible);
 }
 
+function setLiveText(id, value) {
+  const node = byId(id);
+  const next = String(value);
+  if (node.textContent !== next) node.textContent = next;
+}
+
 function setCellText(cell, text, className = '') {
   const span = make('span', className, text || '—');
   cell.append(span);
@@ -109,6 +120,13 @@ function makeRecentRow(event) {
 }
 
 function renderRecent(events = []) {
+  const signature = JSON.stringify(events.map((event) => [
+    event.id, event.user_name, event.vehicle_plate, event.card_uid, event.direction,
+    event.access_status, event.card_tapped_at, event.vehicle_passed_at,
+    event.parking_user?.full_name, event.parking_user?.vehicle_plate,
+  ]));
+  if (signature === state.recentSignature) return;
+  state.recentSignature = signature;
   const body = byId('recent-events-body');
   body.replaceChildren(...events.map(makeRecentRow));
   setEmpty('recent-empty', events.length === 0);
@@ -119,15 +137,17 @@ function renderDashboard(data) {
   const entries = Number(stats.entries_today || 0);
   const exits = Number(stats.exits_today || 0);
   const total = entries + exits;
-  byId('stat-users').textContent = Number(stats.registered_users || 0).toLocaleString('en-IN');
-  byId('stat-inside').textContent = Number(stats.vehicles_inside || 0).toLocaleString('en-IN');
-  byId('stat-entries').textContent = entries.toLocaleString('en-IN');
-  byId('stat-exits').textContent = exits.toLocaleString('en-IN');
-  byId('nav-user-count').textContent = Number(stats.registered_users || 0).toLocaleString('en-IN');
-  byId('movement-entries').textContent = entries.toLocaleString('en-IN');
-  byId('movement-exits').textContent = exits.toLocaleString('en-IN');
-  byId('entry-bar').style.width = total ? `${Math.max(3, entries / total * 100)}%` : '0%';
-  byId('exit-bar').style.width = total ? `${Math.max(3, exits / total * 100)}%` : '0%';
+  setLiveText('stat-users', Number(stats.registered_users || 0).toLocaleString('en-IN'));
+  setLiveText('stat-inside', Number(stats.vehicles_inside || 0).toLocaleString('en-IN'));
+  setLiveText('stat-entries', entries.toLocaleString('en-IN'));
+  setLiveText('stat-exits', exits.toLocaleString('en-IN'));
+  setLiveText('nav-user-count', Number(stats.registered_users || 0).toLocaleString('en-IN'));
+  setLiveText('movement-entries', entries.toLocaleString('en-IN'));
+  setLiveText('movement-exits', exits.toLocaleString('en-IN'));
+  const entryWidth = total ? `${Math.max(3, entries / total * 100)}%` : '0%';
+  const exitWidth = total ? `${Math.max(3, exits / total * 100)}%` : '0%';
+  if (byId('entry-bar').style.width !== entryWidth) byId('entry-bar').style.width = entryWidth;
+  if (byId('exit-bar').style.width !== exitWidth) byId('exit-bar').style.width = exitWidth;
 }
 
 async function loadDashboardSnapshot() {
@@ -136,6 +156,7 @@ async function loadDashboardSnapshot() {
   try {
     const data = await requestJson('/api/dashboard/snapshot', { cache: 'no-store' });
     if (!data.configured) {
+      state.databaseConfigured = false;
       showSetupBanner('setup');
       byId('stat-users').textContent = '—';
       byId('stat-inside').textContent = '—';
@@ -150,20 +171,37 @@ async function loadDashboardSnapshot() {
       byId('snapshot-label').textContent = 'Database setup needed';
       return;
     }
+    state.databaseConfigured = true;
     renderDashboard(data);
-    renderRecent(data.recent_events || []);
     state.hasSnapshot = true;
     const updated = data.sampled_at
       ? formatDate(data.sampled_at, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
       : 'just now';
-    byId('snapshot-label').textContent = `Updated ${updated}`;
+    byId('snapshot-label').textContent = `Live · ${updated}`;
     hideSetupBanner();
+    loadRecentEvents();
   } catch (error) {
     if (!state.hasSnapshot) showSetupBanner('error', 'Dashboard data is unavailable. Check the server and Supabase connection.');
     else setConnection('is-error', 'Refresh retrying');
     byId('snapshot-label').textContent = state.hasSnapshot ? 'Refresh delayed · keeping latest data' : 'Waiting for live data';
+    // Sensor state is served from the local Flask process, so it can still update
+    // while Supabase is temporarily unavailable.
+    await loadDeviceStatus();
   } finally {
     state.snapshotLoading = false;
+  }
+}
+
+async function loadRecentEvents() {
+  if (state.recentLoading || state.databaseConfigured !== true) return;
+  state.recentLoading = true;
+  try {
+    const data = await requestJson('/api/dashboard/recent', { cache: 'no-store' });
+    renderRecent(data.items || []);
+  } catch (error) {
+    // Keep the last good activity rows visible while the database retries.
+  } finally {
+    state.recentLoading = false;
   }
 }
 
@@ -191,6 +229,18 @@ function renderDeviceStatus(status) {
   byId('gate-state').textContent = online ? (gateOpen ? 'Open' : 'Closed') : 'Offline';
   panel.classList.toggle('gate-is-open', gateOpen);
   document.querySelector('.gate-arm').classList.toggle('is-open', gateOpen);
+  panel.classList.toggle('car-is-waiting', online && (status.vehicle_waiting === true || (gateOpen && status.passage_started !== true)));
+  panel.classList.toggle('car-is-passing', online && status.passage_started === true);
+  const phaseLabels = {
+    HARDWARE_ERROR: 'Gate unavailable · check the servo',
+    CHECKING_ACCESS: 'Card read · checking access',
+    TAP_RFID: 'Vehicle detected · tap your RFID',
+    GATE_OPEN: 'Gate open · you can go now',
+    PASSING: 'Vehicle crossing · watching second IR',
+    NEXT_CAR: 'Thank you · next vehicle come forward',
+    WAITING_FOR_CAR: 'Waiting for a vehicle at the first IR',
+  };
+  setLiveText('controller-phase', online ? (phaseLabels[status.phase] || phaseLabels.WAITING_FOR_CAR) : 'Waiting for the ESP32 connection');
   updateSensorReading('entry-ir-indicator', 'entry-ir-state', online, status.ir_entry_detected === true);
   updateSensorReading('exit-ir-indicator', 'exit-ir-state', online, status.ir_exit_detected === true);
 
@@ -245,7 +295,11 @@ async function loadUsers() {
   try {
     const data = await requestJson(`/api/users?${query}`);
     const body = byId('users-body');
-    body.replaceChildren(...(data.items || []).map(renderUserRow));
+    const signature = JSON.stringify(data.items || []);
+    if (signature !== state.userRowsSignature) {
+      body.replaceChildren(...(data.items || []).map(renderUserRow));
+      state.userRowsSignature = signature;
+    }
     byId('users-total-label').textContent = `${Number(data.total || 0).toLocaleString('en-IN')} registered parking users`;
     renderPagination('users', data.page || 1, data.total || 0, data.limit || PAGE_SIZE, 'users-prev', 'users-next');
     setEmpty('users-empty', (data.items || []).length === 0);
@@ -274,11 +328,17 @@ function renderEventRow(event) {
 }
 
 async function loadEvents() {
+  if (state.eventLoading) return;
+  state.eventLoading = true;
   const query = new URLSearchParams({ page: String(state.eventPage), limit: String(PAGE_SIZE), q: state.eventQuery, direction: state.eventDirection });
   try {
     const data = await requestJson(`/api/events?${query}`);
     const body = byId('events-body');
-    body.replaceChildren(...(data.items || []).map(renderEventRow));
+    const signature = JSON.stringify(data.items || []);
+    if (signature !== state.eventRowsSignature) {
+      body.replaceChildren(...(data.items || []).map(renderEventRow));
+      state.eventRowsSignature = signature;
+    }
     byId('events-total-label').textContent = `${Number(data.total || 0).toLocaleString('en-IN')} access events`;
     renderPagination('events', data.page || 1, data.total || 0, data.limit || PAGE_SIZE, 'events-prev', 'events-next');
     setEmpty('events-empty', (data.items || []).length === 0);
@@ -289,6 +349,8 @@ async function loadEvents() {
     byId('events-body').replaceChildren();
     setEmpty('events-empty', true);
     toast(error.message, true);
+  } finally {
+    state.eventLoading = false;
   }
 }
 
@@ -400,16 +462,31 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDashboardSnapshot();
   loadDeviceStatus();
   window.setInterval(() => {
-    if (document.visibilityState !== 'visible') return;
-    loadDeviceStatus();
-  }, 400);
+    if (document.visibilityState === 'visible') loadDeviceStatus();
+  }, DEVICE_STATUS_REFRESH_MS);
   window.setInterval(() => {
     if (document.visibilityState !== 'visible') return;
     loadDashboardSnapshot();
-  }, 2000);
+  }, OVERVIEW_REFRESH_MS);
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible') loadRecentEvents();
+  }, RECENT_REFRESH_MS);
   window.setInterval(() => {
     if (document.visibilityState !== 'visible') return;
     if (state.view === 'users') loadUsers();
+  }, USER_LIST_REFRESH_MS);
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible' && state.view === 'events') loadEvents();
+  }, ACCESS_LOG_REFRESH_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    loadDashboardSnapshot();
+    if (state.view === 'users') loadUsers();
     if (state.view === 'events') loadEvents();
-  }, 10000);
+  });
+  window.addEventListener('online', () => {
+    loadDashboardSnapshot();
+    if (state.view === 'users') loadUsers();
+    if (state.view === 'events') loadEvents();
+  });
 });

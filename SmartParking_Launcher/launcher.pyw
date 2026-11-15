@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import os
 import queue
 import shutil
@@ -9,8 +10,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 import webbrowser
 from pathlib import Path
 import tkinter as tk
@@ -18,6 +17,10 @@ import tkinter as tk
 
 APP_TITLE = "Parkline Control Center"
 DASHBOARD_URL = "http://127.0.0.1:5000"
+STARTUP_TIMEOUT_SECONDS = 20.0
+STARTUP_PROBE_TIMEOUT_SECONDS = 0.6
+STARTUP_POLL_INTERVAL_SECONDS = 0.25
+LOG_ROTATE_BYTES = 1_000_000
 BG = "#F3F6F5"
 INK = "#102D2B"
 TEAL = "#147D73"
@@ -51,6 +54,7 @@ class ParkingLauncher:
         self.running = False
         self.busy = False
         self.close_after_work = False
+        self.last_probe_error: str | None = None
 
         self.status_text = tk.StringVar(value="Ready to start")
         self.detail_text = tk.StringVar(value=self._configuration_hint())
@@ -58,6 +62,9 @@ class ParkingLauncher:
         self._refresh_buttons()
         self.root.after(250, self._drain_events)
         self.root.after(900, self._monitor_process)
+        # Double-clicking the launcher should start Flask and open the page without
+        # requiring a second click in the control-center window.
+        self.root.after(400, self._primary_action)
 
     def _build_ui(self) -> None:
         header = tk.Frame(self.root, bg=INK, padx=30, pady=24)
@@ -96,7 +103,7 @@ class ParkingLauncher:
 
         footer = tk.Frame(body, bg=BG)
         footer.pack(fill="x", side="bottom", pady=(18, 0))
-        tk.Label(footer, text="The server listens on this computer only.", bg=BG, fg=MUTED, font=("Segoe UI", 8)).pack(side="left")
+        tk.Label(footer, text="Dashboard and gate device use this computer’s private Wi-Fi network.", bg=BG, fg=MUTED, font=("Segoe UI", 8)).pack(side="left")
         tk.Label(footer, text="Logs are saved in SmartParking_Launcher/logs", bg=BG, fg=MUTED, font=("Segoe UI", 8)).pack(side="right")
 
     def _configuration_hint(self) -> str:
@@ -180,14 +187,23 @@ class ParkingLauncher:
             sock.settimeout(0.25)
             return sock.connect_ex(("127.0.0.1", 5000)) == 0
 
-    @staticmethod
-    def _dashboard_responds() -> bool:
+    def _dashboard_responds(self, timeout: float = STARTUP_PROBE_TIMEOUT_SECONDS) -> bool:
+        connection = http.client.HTTPConnection("127.0.0.1", 5000, timeout=timeout)
         try:
-            with urllib.request.urlopen(DASHBOARD_URL, timeout=1.0) as response:
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            with response:
                 body = response.read(2048).decode("utf-8", errors="ignore")
-                return response.status == 200 and "<html" in body.lower()
-        except (OSError, urllib.error.URLError, TimeoutError):
+                if response.status == 200 and "<html" in body.lower():
+                    self.last_probe_error = None
+                    return True
+                self.last_probe_error = f"HTTP {response.status} from the dashboard"
+                return False
+        except (OSError, http.client.HTTPException, TimeoutError) as exc:
+            self.last_probe_error = f"{type(exc).__name__}: {exc}"
             return False
+        finally:
+            connection.close()
 
     @staticmethod
     def _find_brave() -> Path | None:
@@ -213,10 +229,12 @@ class ParkingLauncher:
 
     def _open_dashboard(self) -> None:
         if not self._dashboard_responds():
-            self.running = False
-            self.status_text.set("Not running")
-            self.detail_text.set("The dashboard is not responding yet. Choose Start dashboard first.")
+            self.running = True
+            self.status_text.set("Checking access")
+            self.status_badge.configure(bg="#FFF1D6", fg=AMBER)
+            self.detail_text.set("Opening the dashboard to check access. Flask is still running; check the dashboard log if the page stays unavailable.")
             self._refresh_buttons()
+            self._open_browser()
             return
         self.running = True
         self.status_text.set("Running")
@@ -245,8 +263,18 @@ class ParkingLauncher:
             self._open_browser()
             return
         if self._port_open():
-            self.events.put(("error", "Port 5000 is already in use by another app. Close it and try again."))
-            return
+            # A previous launcher may still be bringing Flask up. Give it a
+            # moment to answer HTTP before treating the occupied port as an error.
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and self._port_open():
+                if self._dashboard_responds(timeout=STARTUP_PROBE_TIMEOUT_SECONDS):
+                    self.events.put(("external", None))
+                    self._open_browser()
+                    return
+                time.sleep(STARTUP_POLL_INTERVAL_SECONDS)
+            if self._port_open():
+                self.events.put(("error", "Port 5000 is in use, but it is not answering as the Smart Parking dashboard. Close that app and try again."))
+                return
         if not self._prepare_environment():
             return
         if self._dashboard_responds():
@@ -256,7 +284,13 @@ class ParkingLauncher:
 
         environment = os.environ.copy()
         environment["PARKLINE_OPEN_BROWSER"] = "0"
+        environment["PYTHONUNBUFFERED"] = "1"
         log_path = self.logs_dir / "dashboard.log"
+        try:
+            if log_path.is_file() and log_path.stat().st_size >= LOG_ROTATE_BYTES:
+                log_path.replace(self.logs_dir / "dashboard.previous.log")
+        except OSError:
+            pass
         try:
             self.log_handle = log_path.open("a", encoding="utf-8", errors="replace")
             process = subprocess.Popen(
@@ -275,22 +309,22 @@ class ParkingLauncher:
             return
 
         self.events.put(("started", process))
-        for _ in range(60):
+        deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
             if process.poll() is not None:
-                self.events.put(("error", "Flask stopped during startup. Check SmartParking_Launcher/logs/dashboard.log."))
+                self.events.put(("start_failed", "Flask stopped during startup. Check SmartParking_Launcher/logs/dashboard.log."))
                 return
-            if self._dashboard_responds():
+            if self._dashboard_responds(timeout=STARTUP_PROBE_TIMEOUT_SECONDS):
                 self.events.put(("ready", None))
                 self._open_browser()
                 return
-            time.sleep(0.5)
+            time.sleep(min(STARTUP_POLL_INTERVAL_SECONDS, max(0.0, deadline - time.monotonic())))
         if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=4)
-            except subprocess.TimeoutExpired:
-                process.kill()
-        self.events.put(("error", "Dashboard did not respond within 30 seconds. Check dashboard.log."))
+            detail = self.last_probe_error or "no HTTP response"
+            self.events.put(("probe_timeout", detail))
+            self._open_browser()
+            return
+        self.events.put(("start_failed", "Flask stopped during startup. Check SmartParking_Launcher/logs/dashboard.log."))
 
     def _stop_owned_process(self) -> None:
         process = self.process
@@ -331,6 +365,18 @@ class ParkingLauncher:
                     self.status_badge.configure(bg=MINT, fg=TEAL_DARK)
                     self.detail_text.set("Dashboard is ready. Flask is using the local Supabase configuration.")
                     self.busy = False
+                elif kind == "listening":
+                    self.running = True
+                    self.status_text.set("Listening")
+                    self.status_badge.configure(bg=MINT, fg=TEAL_DARK)
+                    self.detail_text.set("Flask is listening on port 5000. The page check did not finish, so the dashboard was opened for inspection.")
+                    self.busy = False
+                elif kind == "probe_timeout":
+                    self.running = True
+                    self.status_text.set("Check access")
+                    self.status_badge.configure(bg="#FFF1D6", fg=AMBER)
+                    self.detail_text.set(f"Flask started but the local page check timed out ({payload}). The server is being kept running so the browser and ESP32 can retry. Check SmartParking_Launcher/logs/dashboard.log if it stays unavailable.")
+                    self.busy = False
                 elif kind == "external":
                     self.running = True
                     self.owned = False
@@ -351,6 +397,15 @@ class ParkingLauncher:
                     self.status_badge.configure(bg="#FCE9E9", fg=RED)
                     self.detail_text.set(str(payload))
                     self.busy = False
+                elif kind == "start_failed":
+                    self.running = False
+                    self.owned = False
+                    self.process = None
+                    self.status_text.set("Needs attention")
+                    self.status_badge.configure(bg="#FCE9E9", fg=RED)
+                    self.detail_text.set(str(payload))
+                    self.busy = False
+                    self._close_log()
                 self._refresh_buttons()
         except queue.Empty:
             pass

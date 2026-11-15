@@ -33,11 +33,26 @@ DEVICE_STATUS = {
     "gate_open": False,
     "ir_entry_detected": False,
     "ir_exit_detected": False,
+    "vehicle_waiting": False,
+    "passage_started": False,
+    "phase": "WAITING_FOR_CAR",
     "wifi_rssi": None,
     "_last_seen_monotonic": 0.0,
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+
+class QuietDashboardPollingFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "werkzeug":
+            return True
+        message = record.getMessage()
+        return '"GET /api/device/status ' not in message and '"GET /api/dashboard/snapshot ' not in message
+
+
+# Keep useful server startup/access logs while avoiding a line for every fast UI poll.
+logging.getLogger("werkzeug").addFilter(QuietDashboardPollingFilter())
 logger = logging.getLogger("parking_dashboard")
 
 
@@ -400,6 +415,12 @@ def create_app() -> Flask:
                 "gate_open": payload.get("gate_open") is True,
                 "ir_entry_detected": payload.get("ir_entry_detected") is True,
                 "ir_exit_detected": payload.get("ir_exit_detected") is True,
+                "vehicle_waiting": payload.get("vehicle_waiting") is True,
+                "passage_started": payload.get("passage_started") is True,
+                "phase": payload.get("phase") if payload.get("phase") in {
+                    "HARDWARE_ERROR", "CHECKING_ACCESS", "TAP_RFID", "GATE_OPEN",
+                    "PASSING", "NEXT_CAR", "WAITING_FOR_CAR"
+                } else "WAITING_FOR_CAR",
                 "wifi_rssi": wifi_rssi,
                 "_last_seen_monotonic": monotonic(),
             })
@@ -420,5 +441,5 @@ if __name__ == "__main__":
         threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
     print("Smart Parking Dashboard: http://127.0.0.1:5000")
     host = os.getenv("PARKING_HOST", "127.0.0.1").strip() or "127.0.0.1"
-    print("The browser dashboard is restricted to this computer; the ESP32 API uses its device key.")
+    print(f"Server binding address: {host}; device API calls require the configured ESP32 key.")
     app.run(host=host, port=5000, debug=False, threaded=True)

@@ -11,7 +11,7 @@ A local Flask dashboard for managing registered parking users and reviewing RFID
 - **Windows Control Center** — `Start_Smart_Parking.vbs` opens a quiet Smart Print-style launcher with status, start/stop, and open-dashboard controls. It prepares Python packages in the background, checks that Flask is responding, then opens the UI. `run_dashboard.bat` remains available as a console fallback.
 - **ESP32 gate integration** — authenticated RFID checks, card-tap records, IR-confirmed passage records, gate/sensor heartbeat status, and a closed-gate timeout.
 
-The overview counters and recent-access rows refresh together from one dashboard snapshot every 2 seconds. The two IR readings update together within about half a second in the browser; the ESP32 sends sensor and gate changes immediately, with a 5-second keepalive. User lists and full access logs refresh every 10 seconds while their pages are open. Dashboard pages and admin APIs are restricted to this computer; only the device API is reachable by the ESP32 on the trusted network.
+The gate and IR state poll from the local Flask process every 250 ms, recent access refreshes every second, and database counters refresh every 5 seconds. Access logs refresh every second while open; parking users refresh every 5 seconds. This keeps sensor animation responsive without repeatedly querying all dashboard counts.
 
 ## Project index
 
@@ -47,14 +47,14 @@ The SQL trigger updates `parking_users.current_status` only after a granted even
 
 ## Connect the ESP32
 
-The integrated sketch is [`firmware/ParkingGate/ParkingGate.ino`](firmware/ParkingGate/ParkingGate.ino). It matches the confirmed wiring: RC522 on GPIO 5/18/19/22/23, two digital IR sensors on GPIO 32 and 33, and the servo signal on GPIO 25. It reports gate or IR state changes immediately and sends a 5-second keepalive, so both IR readings travel in the same update. Upload the sketch after firmware changes for the board to use them. Wi-Fi, HTTP, SPI, and the ESP32 PWM driver come with the ESP32 Arduino board package; the sketch needs the MFRC522 Arduino library.
+The integrated sketch is [`firmware/ParkingGate/ParkingGate.ino`](firmware/ParkingGate/ParkingGate.ino). It uses the confirmed wiring: RC522 on GPIO 5/18/19/22/23, first/approach IR on GPIO33, second/beyond-gate IR on GPIO32, servo signal on GPIO25, OLED SDA/SCL on GPIO21/26, and buzzer signal on GPIO27. Only the first/approach sensor on GPIO33 starts an RFID session; GPIO32 is used to confirm the vehicle has passed the gate. A car arriving at GPIO33 prompts for RFID with a fast double beep. A server-approved card opens the gate, shows “You can go now” and a thank-you animation, and gives one short beep. After the approach sensor clears, GPIO32 triggers another fast double beep, closes the gate, records passage, and displays “Next vehicle come forward.” The live dashboard phase and sensor readings poll independently of Supabase summary counts. Upload the sketch after firmware changes for the board to use them. Wi-Fi, HTTP, SPI, and the ESP32 PWM driver come with the ESP32 Arduino board package; the sketch needs the MFRC522, Adafruit SSD1306, and Adafruit GFX Arduino libraries.
 
 1. Open `firmware/ParkingGate/secrets.h` and set `WIFI_SSID` and `WIFI_PASSWORD` to a 2.4 GHz Wi-Fi network that the ESP32 and this computer can both reach. The local file already contains this computer's current server address and the matching device key. `secrets.h` is ignored by Git.
 2. If this computer's IPv4 address changes, replace `SERVER_BASE_URL` with `http://<computer IPv4>:5000`. Find it with `ipconfig` in Command Prompt. Do not use `127.0.0.1` in the ESP32 sketch.
-3. Start the dashboard with [`Start_Smart_Parking.vbs`](Start_Smart_Parking.vbs), then upload `ParkingGate.ino` from Arduino IDE. If Windows asks about Python network access, allow it only on your private network.
+3. For ESP32 network access, set `PARKING_HOST=0.0.0.0` in `.env` and allow Python through Windows Firewall on the private network. Start the dashboard with [`Start_Smart_Parking.vbs`](Start_Smart_Parking.vbs), then upload `ParkingGate.ino` from Arduino IDE.
 4. Add the driver, vehicle plate, and exact card UID in **Parking users** before testing a card. The firmware prints each UID in the Serial Monitor. Unknown or inactive cards are recorded as denied and never open the gate.
 
-After a valid tap, the backend stores the card tap time and direction. When either IR sensor detects the car, the firmware closes the gate and marks the passage time; Supabase then updates the user's inside/outside status. If the car does not cross within 15 seconds, the gate closes and no passage is counted. The connected setup currently covers the RC522, two IR sensors, and servo; an LCD has not been added because its wiring/address has not been confirmed.
+After a valid tap, the backend stores the card tap time and direction. The firmware then waits for the vehicle to clear the first IR and reach the second before it closes the gate and marks passage time; Supabase then updates the user's inside/outside status. If the car does not cross within 15 seconds, the gate closes and no passage is counted. The OLED is scanned at startup at 0x3C and 0x3D.
 
 ## Folder contents
 
