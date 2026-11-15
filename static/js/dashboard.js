@@ -1,5 +1,5 @@
 const PAGE_SIZE = 25;
-const state = { view: 'overview', userPage: 1, userQuery: '', eventPage: 1, eventQuery: '', eventDirection: '', recentLoading: false };
+const state = { view: 'overview', userPage: 1, userQuery: '', eventPage: 1, eventQuery: '', eventDirection: '', snapshotLoading: false, deviceLoading: false, hasSnapshot: false };
 const $ = (selector) => document.querySelector(selector);
 const byId = (id) => document.getElementById(id);
 
@@ -130,9 +130,11 @@ function renderDashboard(data) {
   byId('exit-bar').style.width = total ? `${Math.max(3, exits / total * 100)}%` : '0%';
 }
 
-async function loadDashboard() {
+async function loadDashboardSnapshot() {
+  if (state.snapshotLoading) return;
+  state.snapshotLoading = true;
   try {
-    const data = await requestJson('/api/dashboard');
+    const data = await requestJson('/api/dashboard/snapshot', { cache: 'no-store' });
     if (!data.configured) {
       showSetupBanner('setup');
       byId('stat-users').textContent = '—';
@@ -140,27 +142,28 @@ async function loadDashboard() {
       byId('stat-entries').textContent = '—';
       byId('stat-exits').textContent = '—';
       byId('nav-user-count').textContent = '—';
+      byId('movement-entries').textContent = '—';
+      byId('movement-exits').textContent = '—';
+      byId('entry-bar').style.width = '0%';
+      byId('exit-bar').style.width = '0%';
       renderRecent([]);
+      byId('snapshot-label').textContent = 'Database setup needed';
       return;
     }
     renderDashboard(data);
-    if (data.error) showSetupBanner('error'); else hideSetupBanner();
+    renderRecent(data.recent_events || []);
+    state.hasSnapshot = true;
+    const updated = data.sampled_at
+      ? formatDate(data.sampled_at, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+      : 'just now';
+    byId('snapshot-label').textContent = `Updated ${updated}`;
+    hideSetupBanner();
   } catch (error) {
-    showSetupBanner('error');
-    renderRecent([]);
-  }
-}
-
-async function loadRecentEvents() {
-  if (state.recentLoading) return;
-  state.recentLoading = true;
-  try {
-    const data = await requestJson('/api/dashboard/recent', { cache: 'no-store' });
-    renderRecent(data.items || []);
-  } catch (error) {
-    // Keep the last successfully loaded rows visible during a brief connection issue.
+    if (!state.hasSnapshot) showSetupBanner('error', 'Dashboard data is unavailable. Check the server and Supabase connection.');
+    else setConnection('is-error', 'Refresh retrying');
+    byId('snapshot-label').textContent = state.hasSnapshot ? 'Refresh delayed · keeping latest data' : 'Waiting for live data';
   } finally {
-    state.recentLoading = false;
+    state.snapshotLoading = false;
   }
 }
 
@@ -203,11 +206,15 @@ function renderDeviceStatus(status) {
 }
 
 async function loadDeviceStatus() {
+  if (state.deviceLoading) return;
+  state.deviceLoading = true;
   try {
     renderDeviceStatus(await requestJson('/api/device/status', { cache: 'no-store' }));
   } catch (error) {
     renderDeviceStatus({ online: false });
     byId('controller-last-seen').textContent = 'Unable to read the ESP32 status.';
+  } finally {
+    state.deviceLoading = false;
   }
 }
 
@@ -333,7 +340,7 @@ async function submitNewUser(event) {
     form.reset();
     closeUserDialog();
     toast('Parking user added and RFID card linked.');
-    await loadDashboard();
+    await loadDashboardSnapshot();
     if (state.view === 'users') { state.userPage = 1; await loadUsers(); }
   } catch (error) {
     message.textContent = error.message;
@@ -390,20 +397,18 @@ function bindEvents() {
 document.addEventListener('DOMContentLoaded', () => {
   setCurrentDate();
   bindEvents();
-  loadDashboard();
-  loadRecentEvents();
+  loadDashboardSnapshot();
   loadDeviceStatus();
   window.setInterval(() => {
     if (document.visibilityState !== 'visible') return;
     loadDeviceStatus();
-  }, 1000);
+  }, 400);
   window.setInterval(() => {
     if (document.visibilityState !== 'visible') return;
-    loadRecentEvents();
+    loadDashboardSnapshot();
   }, 2000);
   window.setInterval(() => {
     if (document.visibilityState !== 'visible') return;
-    loadDashboard();
     if (state.view === 'users') loadUsers();
     if (state.view === 'events') loadEvents();
   }, 10000);

@@ -6,6 +6,7 @@ import re
 import secrets
 import threading
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -87,11 +88,30 @@ EVENT_COLUMNS = (
     "id,parking_user_id,user_name,vehicle_plate,card_uid,direction,access_status,card_tapped_at,vehicle_passed_at,"
     "parking_user:parking_users(full_name,vehicle_plate)"
 )
+RECENT_DASHBOARD_COLUMNS = (
+    "id,user_name,vehicle_plate,card_uid,direction,access_status,card_tapped_at,vehicle_passed_at,"
+    "parking_user:parking_users(full_name,vehicle_plate)"
+)
+
+
+def current_device_status() -> dict:
+    with DEVICE_STATUS_LOCK:
+        status = dict(DEVICE_STATUS)
+    last_seen_age = monotonic() - status.pop("_last_seen_monotonic")
+    status["online"] = last_seen_age <= 25
+    status["seconds_since_seen"] = round(last_seen_age) if status["last_seen"] else None
+    return status
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY") or secrets.token_urlsafe(32)
+
+    @app.after_request
+    def prevent_stale_dashboard_data(response):
+        if request.path == "/" or request.path.startswith(("/api/", "/static/")):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        return response
 
     @app.before_request
     def keep_dashboard_local():
@@ -114,6 +134,48 @@ def create_app() -> Flask:
     @app.get("/")
     def index():
         return render_template("index.html")
+
+    @app.get("/api/dashboard/snapshot")
+    def dashboard_snapshot():
+        try:
+            get_supabase()
+            today_start = datetime.combine(datetime.now(PARKING_TIMEZONE).date(), time.min, PARKING_TIMEZONE)
+            queries = {
+                "registered_users": lambda: read_count(users_table().select("id", count="exact").limit(1)),
+                "vehicles_inside": lambda: read_count(
+                    users_table().select("id", count="exact").eq("current_status", "INSIDE").limit(1)
+                ),
+                "entries_today": lambda: read_count(
+                    events_table().select("id", count="exact").eq("direction", "ENTRY")
+                    .eq("access_status", "GRANTED").gte("card_tapped_at", today_start.isoformat())
+                    .not_.is_("vehicle_passed_at", "null").limit(1)
+                ),
+                "exits_today": lambda: read_count(
+                    events_table().select("id", count="exact").eq("direction", "EXIT")
+                    .eq("access_status", "GRANTED").gte("card_tapped_at", today_start.isoformat())
+                    .not_.is_("vehicle_passed_at", "null").limit(1)
+                ),
+            }
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                count_futures = {name: pool.submit(query) for name, query in queries.items()}
+                recent_future = pool.submit(
+                    lambda: events_table().select(RECENT_DASHBOARD_COLUMNS)
+                    .order("card_tapped_at", desc=True).limit(8).execute()
+                )
+                stats = {name: future.result() for name, future in count_futures.items()}
+                recent_events = recent_future.result().data or []
+            return jsonify({
+                "configured": True,
+                "sampled_at": datetime.now(timezone.utc).isoformat(),
+                "stats": stats,
+                "recent_events": recent_events,
+                "device_status": current_device_status(),
+            })
+        except SupabaseNotConfigured:
+            return jsonify({"configured": False, "setup_required": True, "stats": {}, "recent_events": []})
+        except Exception:
+            log_database_error("synchronized dashboard snapshot")
+            return jsonify({"configured": True, "error": "connection"}), 503
 
     @app.get("/api/dashboard")
     def dashboard_data():
@@ -345,12 +407,7 @@ def create_app() -> Flask:
 
     @app.get("/api/device/status")
     def device_status():
-        with DEVICE_STATUS_LOCK:
-            status = dict(DEVICE_STATUS)
-        last_seen_age = monotonic() - status.pop("_last_seen_monotonic")
-        status["online"] = last_seen_age <= 25
-        status["seconds_since_seen"] = round(last_seen_age) if status["last_seen"] else None
-        return jsonify(status)
+        return jsonify(current_device_status())
 
     return app
 

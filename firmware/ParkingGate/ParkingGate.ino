@@ -24,7 +24,7 @@ constexpr int SERVO_CLOSED_US = 1000;
 constexpr int SERVO_OPEN_US = 2000;
 constexpr int GATE_OPEN_ANGLE = 90;
 constexpr unsigned long GATE_TIMEOUT_MS = 15000;
-constexpr unsigned long HEARTBEAT_INTERVAL_MS = 1000;
+constexpr unsigned long HEARTBEAT_INTERVAL_MS = 5000;
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 10000;
 constexpr unsigned long CARD_COOLDOWN_MS = 1200;
 
@@ -34,6 +34,10 @@ bool gateOpen = false;
 bool sensorsArmed = false;
 bool previousEntryDetected = false;
 bool previousExitDetected = false;
+bool heartbeatStateKnown = false;
+bool lastReportedGateOpen = false;
+bool lastReportedEntryDetected = false;
+bool lastReportedExitDetected = false;
 unsigned long gateOpenedAt = 0;
 unsigned long lastHeartbeatAt = 0;
 unsigned long lastWifiRetryAt = 0;
@@ -190,8 +194,15 @@ void confirmVehiclePassage() {
 }
 
 void sendHeartbeat(bool entryDetected, bool exitDetected) {
-  if (millis() - lastHeartbeatAt < HEARTBEAT_INTERVAL_MS) return;
+  const bool stateChanged = !heartbeatStateKnown || gateOpen != lastReportedGateOpen ||
+    entryDetected != lastReportedEntryDetected || exitDetected != lastReportedExitDetected;
+  if (!stateChanged && millis() - lastHeartbeatAt < HEARTBEAT_INTERVAL_MS) return;
+
   lastHeartbeatAt = millis();
+  heartbeatStateKnown = true;
+  lastReportedGateOpen = gateOpen;
+  lastReportedEntryDetected = entryDetected;
+  lastReportedExitDetected = exitDetected;
 
   String response;
   const String body = String("{\"gate_open\":") + (gateOpen ? "true" : "false") +
@@ -241,6 +252,9 @@ void loop() {
     previousExitDetected = exitDetected;
   }
 
+  // Report both IR readings together as soon as either sensor changes.
+  sendHeartbeat(entryDetected, exitDetected);
+
   if (!gateOpen && millis() - lastCardAt >= CARD_COOLDOWN_MS &&
       reader.PICC_IsNewCardPresent() && reader.PICC_ReadCardSerial()) {
     handleCardTap(entryDetected, exitDetected);
@@ -266,6 +280,7 @@ void loop() {
     WiFi.reconnect();
   }
 
+  // Also report gate changes caused by RFID approval or vehicle passage.
   sendHeartbeat(entryDetected, exitDetected);
   delay(20);
 }

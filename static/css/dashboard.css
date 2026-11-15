@@ -82,6 +82,7 @@ svg { display: block; }
 .connection-pill.is-error { color: #a75652; background: #fff6f5; border-color: #f2dbd9; }
 .connection-pill.is-error .connection-dot { background: #c56b65; }
 .topbar-divider { width: 1px; height: 18px; background: #e7edeb; }
+.snapshot-label { color: #80908e; font-size: 9px; white-space: nowrap; }
 .today-label { color: #8b989b; font-size: 10px; }
 .page-content { width: min(100%, 1450px); padding: 30px 37px 17px; margin: 0 auto; }
 .view-section { display: none; animation: appear .22s ease both; }
@@ -257,7 +258,7 @@ tbody tr:hover { background: #fcfdfd; }
   .page-content { padding: 25px 20px 15px; }
 }
 @media (max-width: 650px) {
-  .topbar { padding: 0 15px; }.today-label, .topbar-divider { display: none; }
+  .topbar { padding: 0 15px; }.today-label, .topbar-divider { display: none; }.snapshot-label { font-size: 8px; }
   .page-content { padding: 22px 14px 13px; }.page-heading { align-items: flex-start; margin-bottom: 18px; }
   .page-heading h1 { font-size: 21px; }.page-heading p { max-width: 300px; line-height: 1.5; }
   .page-heading > .button { min-height: 34px; padding: 0 10px; font-size: 9px; }

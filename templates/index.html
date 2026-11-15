@@ -57,6 +57,8 @@
           <div class="topbar-right">
             <span class="connection-pill" id="connection-pill"><span class="connection-dot"></span><span id="connection-label">Checking connection</span></span>
             <span class="topbar-divider"></span>
+            <span class="snapshot-label" id="snapshot-label" aria-live="polite">Syncing live data</span>
+            <span class="topbar-divider"></span>
             <span class="today-label" id="today-label"></span>
           </div>
         </header>
@@ -118,12 +120,12 @@
                   <div class="hardware-reading"><span>Entry IR</span><strong><i class="reading-indicator" id="entry-ir-indicator"></i><span id="entry-ir-state">Waiting</span></strong></div>
                   <div class="hardware-reading"><span>Exit IR</span><strong><i class="reading-indicator" id="exit-ir-indicator"></i><span id="exit-ir-state">Waiting</span></strong></div>
                 </div>
-                <div class="controller-note"><span class="note-icon" aria-hidden="true">i</span><p id="controller-last-seen">Live status refreshes every second.</p></div>
+                <div class="controller-note"><span class="note-icon" aria-hidden="true">i</span><p id="controller-last-seen">Entry and exit IR readings update together.</p></div>
               </section>
             </div>
 
             <section class="panel table-panel">
-              <div class="panel-heading table-panel-heading"><div><h2>Recent access</h2><p>RFID taps and confirmed passages · checks for updates every 2 seconds</p></div><button class="text-button" type="button" data-view-link="events">View access logs <span aria-hidden="true">→</span></button></div>
+              <div class="panel-heading table-panel-heading"><div><h2>Recent access</h2><p>RFID taps and confirmed passages · refreshes with the live overview</p></div><button class="text-button" type="button" data-view-link="events">View access logs <span aria-hidden="true">→</span></button></div>
               <div class="table-scroll"><table><thead><tr><th>USER</th><th>VEHICLE</th><th>CARD UID</th><th>DIRECTION</th><th>CARD TAP</th><th>PASSAGE</th></tr></thead><tbody id="recent-events-body"></tbody></table></div>
               <div class="empty-state is-hidden" id="recent-empty"><div class="empty-icon">⌁</div><strong>No access activity yet</strong><p>RFID taps will show here after events arrive in Supabase.</p></div>
             </section>
